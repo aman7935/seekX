@@ -8,6 +8,7 @@ use walkdir::WalkDir;
 pub struct DesktopApp {
     pub name: String,
     pub exec: String,
+    pub icon: Option<String>,
     pub comment: Option<String>,
     pub search_text: String,
 }
@@ -102,6 +103,10 @@ fn parse_desktop_file(path: &Path) -> Option<DesktopApp> {
         .get("Comment")
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty());
+    let icon = section
+        .get("Icon")
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
 
     let mut search_parts = vec![name.clone(), exec.clone()];
     if let Some(comment) = &comment {
@@ -119,6 +124,7 @@ fn parse_desktop_file(path: &Path) -> Option<DesktopApp> {
     Some(DesktopApp {
         name,
         exec,
+        icon,
         comment,
         search_text,
     })
