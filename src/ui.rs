@@ -13,8 +13,9 @@ use crate::launcher::{Launcher, RankedApp};
 
 const RESULT_LIMIT: usize = 9;
 const WINDOW_WIDTH: i32 = 580;
-const WINDOW_HEIGHT: i32 = 260;
-const RESULTS_AREA_HEIGHT: i32 = 170;
+const SEARCH_BOX_HEIGHT: i32 = 62;
+const RESULTS_AREA_HEIGHT: i32 = 200;
+const ANIMATION_MS: u32 = 200;
 
 #[derive(Default)]
 struct UiState {
@@ -40,22 +41,34 @@ fn build_ui(app: &gtk::Application, launcher: Launcher) {
         .application(app)
         .title("seekX")
         .default_width(WINDOW_WIDTH)
-        .default_height(WINDOW_HEIGHT)
+        .default_height(SEARCH_BOX_HEIGHT)
         .resizable(false)
         .decorated(false)
         .build();
     window.add_css_class("seekx-window");
+    window.remove_css_class("background");
+    window.remove_css_class("solid-csd");
     window.set_hide_on_close(true);
     setup_layer_shell(&window);
 
-    let container = gtk::Box::new(gtk::Orientation::Vertical, 10);
-    container.add_css_class("seekx-root");
+    // ── Outer wrapper: transparent, vertical, holds both boxes ──
+    let outer = gtk::Box::new(gtk::Orientation::Vertical, 8);
+    outer.add_css_class("seekx-outer");
+
+    // ── Search box ──
+    let search_box = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    search_box.add_css_class("seekx-search-box");
 
     let entry = gtk::Entry::builder()
         .placeholder_text("Search apps or web")
         .hexpand(true)
         .build();
     entry.add_css_class("seekx-entry");
+    search_box.append(&entry);
+
+    // ── Results box ──
+    let results_box = gtk::Box::new(gtk::Orientation::Vertical, 4);
+    results_box.add_css_class("seekx-results-box");
 
     let status = gtk::Label::new(Some("Matches: 0"));
     status.set_xalign(0.0);
@@ -73,15 +86,24 @@ fn build_ui(app: &gtk::Application, launcher: Launcher) {
         .child(&list)
         .build();
     scroller.set_has_frame(false);
-    scroller.set_visible(true);
     scroller.set_min_content_height(RESULTS_AREA_HEIGHT);
     scroller.set_max_content_height(RESULTS_AREA_HEIGHT);
     scroller.add_css_class("seekx-scroll");
 
-    container.append(&entry);
-    container.append(&status);
-    container.append(&scroller);
-    window.set_child(Some(&container));
+    results_box.append(&status);
+    results_box.append(&scroller);
+
+    // ── Revealer for animated show/hide of results ──
+    let revealer = gtk::Revealer::new();
+    revealer.set_transition_type(gtk::RevealerTransitionType::SlideDown);
+    revealer.set_transition_duration(ANIMATION_MS);
+    revealer.set_reveal_child(false);
+    revealer.set_child(Some(&results_box));
+
+    // ── Assemble ──
+    outer.append(&search_box);
+    outer.append(&revealer);
+    window.set_child(Some(&outer));
 
     let state = Rc::new(RefCell::new(UiState::default()));
 
@@ -89,19 +111,15 @@ fn build_ui(app: &gtk::Application, launcher: Launcher) {
         let state = state.clone();
         let launcher = launcher.clone();
         let list = list.clone();
-        let scroller = scroller.clone();
-        let window = window.clone();
-        let container = container.clone();
         let status = status.clone();
+        let revealer = revealer.clone();
         entry.connect_changed(move |entry| {
             refresh_results(
                 &launcher,
                 entry,
                 &list,
-                &scroller,
                 &status,
-                &container,
-                &window,
+                &revealer,
                 &state,
             );
         });
@@ -137,6 +155,7 @@ fn build_ui(app: &gtk::Application, launcher: Launcher) {
     }
 
     let key_controller = gtk::EventControllerKey::new();
+    key_controller.set_propagation_phase(gtk::PropagationPhase::Capture);
     {
         let launcher = launcher.clone();
         let state = state.clone();
@@ -175,10 +194,8 @@ fn build_ui(app: &gtk::Application, launcher: Launcher) {
         &launcher,
         &entry,
         &list,
-        &scroller,
         &status,
-        &container,
-        &window,
+        &revealer,
         &state,
     );
     window.present();
@@ -195,7 +212,7 @@ fn setup_layer_shell(window: &gtk::ApplicationWindow) {
     window.set_layer(layer_shell::Layer::Overlay);
     window.set_keyboard_mode(layer_shell::KeyboardMode::Exclusive);
     window.set_namespace("seekx");
-    center_layer_shell(window, WINDOW_HEIGHT);
+    center_layer_shell(window, SEARCH_BOX_HEIGHT);
 }
 
 #[cfg(not(feature = "layer-shell"))]
@@ -225,7 +242,7 @@ fn center_layer_shell(window: &gtk::ApplicationWindow, _height: i32) {
 
     let geometry = monitor.geometry();
     let left = ((geometry.width() - WINDOW_WIDTH) / 2).max(0);
-    let top = ((geometry.height() - WINDOW_HEIGHT) / 2).max(0);
+    let top = (geometry.height() / 3).max(0);
 
     window.set_anchor(layer_shell::Edge::Left, true);
     window.set_anchor(layer_shell::Edge::Right, false);
@@ -265,10 +282,8 @@ fn refresh_results(
     launcher: &Launcher,
     entry: &gtk::Entry,
     list: &gtk::ListBox,
-    scroller: &gtk::ScrolledWindow,
     status: &gtk::Label,
-    container: &gtk::Box,
-    window: &gtk::ApplicationWindow,
+    revealer: &gtk::Revealer,
     state: &Rc<RefCell<UiState>>,
 ) {
     let query = entry.text().to_string();
@@ -294,7 +309,6 @@ fn refresh_results(
                 .build();
             container_box.append(&image);
         } else {
-            // Fallback to a generic icon if none is provided
             let image = gtk::Image::builder()
                 .icon_name("application-x-executable")
                 .pixel_size(32)
@@ -310,23 +324,19 @@ fn refresh_results(
         list.append(&row);
     }
 
-    status.set_text(&format!(
-        "Installed: {} | Matches: {}",
-        launcher.app_count(),
-        results.len()
-    ));
+    // status.set_text(&format!(
+    //     "Installed: {} | Matches: {}",
+    //     launcher.app_count(),
+    //     results.len()
+    // ));
 
     if let Some(row) = list.row_at_index(0) {
         list.select_row(Some(&row));
     }
 
-    let has_results = !results.is_empty();
-    scroller.set_visible(has_results || !trimmed.is_empty());
-    container.set_size_request(-1, WINDOW_HEIGHT - 24);
-    window.set_default_size(WINDOW_WIDTH, WINDOW_HEIGHT);
-    window.set_size_request(WINDOW_WIDTH, WINDOW_HEIGHT);
-    center_layer_shell(window, WINDOW_HEIGHT);
-    window.present();
+    // Animate the results box in/out
+    let show = !results.is_empty() || !trimmed.is_empty();
+    revealer.set_reveal_child(show);
 
     state.borrow_mut().results = results;
 }
@@ -349,8 +359,10 @@ fn install_css() {
     provider.load_from_data(
         "
 window.seekx-window,
+window.seekx-window.background,
 window.seekx-window > * {
-  background: #000000;
+  background-color: transparent;
+  background: none;
 }
 
 *,
@@ -361,27 +373,40 @@ window.seekx-window > * {
   box-shadow: none;
 }
 
-.seekx-root {
-  background: #000000;
-  border: 0.5px solid #ffffff;
-  border-radius: 10px;
-  padding: 16px;
+.seekx-outer {
+  background-color: transparent;
+  background: none;
+}
+
+.seekx-search-box {
+  background-color: #0e0e14;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  padding: 10px 18px;
+}
+
+.seekx-results-box {
+  background-color: #0e0e14;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  padding: 10px 16px;
 }
 
 entry.seekx-entry,
 entry.seekx-entry text {
   background: transparent;
-  color: #ffffff;
+  color: #e4e2ec;
   border: none;
   border-radius: 0;
-  font-size: 17px;
+  font-size: 18px;
+  font-weight: 500;
   box-shadow: none;
   outline: none;
 }
 
 entry.seekx-entry {
   min-height: 40px;
-  padding: 0;
+  padding: 0 4px;
 }
 
 entry.seekx-entry:focus {
@@ -399,7 +424,6 @@ scrolledwindow.seekx-scroll:focus,
 scrolledwindow.seekx-scroll:focus-visible {
   outline: none;
   box-shadow: none;
-  border: none;
 }
 
 scrolledwindow.seekx-scroll,
@@ -410,33 +434,67 @@ scrolledwindow.seekx-scroll > viewport > * {
   box-shadow: none;
 }
 
+scrolledwindow.seekx-scroll scrollbar {
+  background: transparent;
+  border: none;
+}
+
+scrolledwindow.seekx-scroll scrollbar slider {
+  background-color: rgba(255, 255, 255, 0.08);
+  border-radius: 99px;
+  min-width: 4px;
+  min-height: 24px;
+}
+
+scrolledwindow.seekx-scroll scrollbar slider:hover {
+  background-color: rgba(255, 255, 255, 0.16);
+}
+
 list.seekx-list {
   background: transparent;
   border: none;
 }
 
 row.seekx-row {
-  background: transparent;
+  background-color: transparent;
   border: none;
-  border-radius: 5px;
-  margin-top: 2px;
-  margin-bottom: 2px;
-  padding: 8px;
+  border-radius: 8px;
+  margin-top: 1px;
+  margin-bottom: 1px;
+  padding: 8px 10px;
+}
+
+row.seekx-row:hover {
+  background-color: rgba(255, 255, 255, 0.04);
 }
 
 row.seekx-row:selected {
-  background: transparent;
+  background-color: rgba(124, 110, 240, 0.15);
   border: none;
 }
 
+row.seekx-row:selected:hover {
+  background-color: rgba(124, 110, 240, 0.22);
+}
+
 label.seekx-label {
-  color: #ffffff;
-  font-size: 15px;
+  color: rgba(228, 226, 236, 0.9);
+  font-size: 14px;
+  font-weight: 400;
+}
+
+row.seekx-row:selected label.seekx-label {
+  color: #d8d4f5;
+  font-weight: 500;
 }
 
 label.seekx-status {
-  color: #ffffff;
-  font-size: 12px;
+  color: rgba(180, 175, 200, 0.45);
+  font-size: 11px;
+  font-weight: 300;
+  padding-top: 2px;
+  padding-bottom: 4px;
+  padding-left: 4px;
 }
 ",
     );
