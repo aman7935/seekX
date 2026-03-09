@@ -24,29 +24,5 @@ pub fn score(query: &str, haystack: &str) -> Option<MatchScore> {
         });
     }
 
-    let mut q_chars = q.chars();
-    let mut current = q_chars.next()?;
-    let mut first_match_idx = None;
-    let mut matched_positions = Vec::new();
-
-    for (idx, c) in h.chars().enumerate() {
-        if c == current {
-            first_match_idx.get_or_insert(idx);
-            matched_positions.push(idx);
-            if let Some(next) = q_chars.next() {
-                current = next;
-            } else {
-                let span = idx.saturating_sub(*first_match_idx.get_or_insert(idx));
-                let compact_bonus = 300_i64.saturating_sub(span as i64 * 3);
-                let start_bonus = 300_i64.saturating_sub(first_match_idx.unwrap_or(0) as i64 * 2);
-                let chain_bonus = (matched_positions.len() as i64) * 60;
-                return Some(MatchScore {
-                    score: 2_000 + compact_bonus + start_bonus + chain_bonus,
-                    start_idx: first_match_idx.unwrap_or(0),
-                });
-            }
-        }
-    }
-
     None
 }

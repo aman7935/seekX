@@ -29,6 +29,7 @@ cargo run
 - `Type`: filter app list
 - `Enter`: launch selected app
 - `Alt+Enter`: open web search with current query
+- `Enter` (with no matching apps): open web search with current query
 - `Esc`: close launcher
 
 ## Notes

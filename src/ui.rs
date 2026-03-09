@@ -4,6 +4,7 @@ use eframe::egui::{Color32, Key, RichText, Stroke, ViewportCommand};
 use crate::launcher::{Launcher, RankedApp};
 
 const RESULT_LIMIT: usize = 9;
+const MIN_CONFIDENT_APP_SCORE: i64 = 3_200;
 
 pub struct SeekXApp {
     launcher: Launcher,
@@ -72,16 +73,42 @@ impl SeekXApp {
         });
 
         if launch_selected {
-            if let Some(selected) = self.cached_results.get(self.selected) {
+            if self.should_search_web_on_enter() {
+                if self.launcher.web_search(&self.query) {
+                    self.request_close = true;
+                }
+            } else if let Some(selected) = self.cached_results.get(self.selected) {
                 self.launcher.launch_app(&selected.app);
                 self.request_close = true;
+            } else if !self.query.trim().is_empty() {
+                if self.launcher.web_search(&self.query) {
+                    self.request_close = true;
+                }
             }
         }
 
         if web_search {
-            self.launcher.web_search(&self.query);
-            self.request_close = true;
+            if self.launcher.web_search(&self.query) {
+                self.request_close = true;
+            }
         }
+    }
+
+    fn should_search_web_on_enter(&self) -> bool {
+        let q = self.query.trim();
+        if q.is_empty() {
+            return false;
+        }
+
+        if self.cached_results.is_empty() {
+            return true;
+        }
+
+        if self.selected != 0 {
+            return false;
+        }
+
+        self.cached_results[0].score < MIN_CONFIDENT_APP_SCORE
     }
 
     fn draw_header(&self, ui: &mut egui::Ui) {
@@ -120,12 +147,6 @@ impl SeekXApp {
 
     fn draw_results(&mut self, ui: &mut egui::Ui) {
         if self.cached_results.is_empty() {
-            ui.add_space(10.0);
-            ui.label(
-                RichText::new("No app matches. Press Alt+Enter to search on the web.")
-                    .size(14.0)
-                    .color(Color32::from_rgb(132, 138, 150)),
-            );
             return;
         }
 

@@ -88,10 +88,10 @@ impl Launcher {
             .spawn();
     }
 
-    pub fn web_search(&self, query: &str) {
+    pub fn web_search(&self, query: &str) -> bool {
         let q = query.trim();
         if q.is_empty() {
-            return;
+            return false;
         }
 
         let url = format!(
@@ -99,15 +99,58 @@ impl Launcher {
             urlencoding::encode(q).into_owned()
         );
 
-        if which::which("xdg-open").is_ok() {
-            let _ = Command::new("xdg-open")
-                .arg(url)
-                .stdin(Stdio::null())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .spawn();
+        if try_spawn("firefox", &["--new-tab", &url]) {
+            return true;
         }
+
+        if try_spawn("google-chrome", &[&url]) {
+            return true;
+        }
+
+        if try_spawn("chromium", &[&url]) {
+            return true;
+        }
+
+        if try_spawn("chromium-browser", &[&url]) {
+            return true;
+        }
+
+        if try_spawn("brave-browser", &[&url]) {
+            return true;
+        }
+
+        if webbrowser::open(&url).is_ok() {
+            return true;
+        }
+
+        if try_spawn("gio", &["open", &url]) {
+            return true;
+        }
+
+        if try_spawn("xdg-open", &[&url]) {
+            return true;
+        }
+
+        if try_spawn("sensible-browser", &[&url]) {
+            return true;
+        }
+
+        false
     }
+}
+
+fn try_spawn(command: &str, args: &[&str]) -> bool {
+    if which::which(command).is_err() {
+        return false;
+    }
+
+    Command::new(command)
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .is_ok()
 }
 
 fn parse_exec(exec_line: &str) -> Vec<String> {

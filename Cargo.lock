@@ -2716,6 +2716,7 @@ dependencies = [
  "shlex",
  "urlencoding",
  "walkdir",
+ "webbrowser",
  "which",
 ]
 
