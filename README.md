@@ -1,6 +1,6 @@
-# seekX - App Launcher for Linux
+# seekX - App Launcher for Linux  
 
-## Apps and Web Search
+## Apps and Web Search  ( More Features are comming )
 
 seekX can search your installed apps as well as the web. App results update as you type, and queries that look like URLs or when you invoke the web search action open in whatever browser the system reports as the default.
 
