@@ -1,8 +1,10 @@
-use std::path::Path;
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use crate::desktop::DesktopApp;
 use crate::search;
+use crate::ui::ResultItem;
 
 const FIELD_CODES: [&str; 14] = [
     "%f", "%F", "%u", "%U", "%d", "%D", "%n", "%N", "%i", "%c", "%k", "%v", "%m", "%",
@@ -30,6 +32,38 @@ impl Launcher {
 
     pub fn app_count(&self) -> usize {
         self.apps.len()
+    }
+
+    pub fn rank_folders(&self, query: &str, limit: usize) -> Vec<ResultItem> {
+        let home = std::env::var("HOME").unwrap_or_default();
+        let path = PathBuf::from(home);
+
+        let search = query.trim_start_matches('/').to_lowercase();
+
+        let mut results = Vec::new();
+
+        if let Ok(entries) = fs::read_dir(path) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+
+                if path.is_dir() {
+                    if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                        if name.to_lowercase().contains(&search) {
+                            results.push(ResultItem::Folder {
+                                name: name.to_string(),
+                                path: path.to_string_lossy().to_string(),
+                            });
+                        }
+                    }
+                }
+
+                if results.len() >= limit {
+                    break;
+                }
+            }
+        }
+
+        results
     }
 
     pub fn rank(&self, query: &str, limit: usize) -> Vec<RankedApp> {

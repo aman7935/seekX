@@ -10,6 +10,14 @@ use gtk4_layer_shell as layer_shell;
 use gtk4_layer_shell::LayerShell;
 
 use crate::launcher::{Launcher, RankedApp};
+#[derive(Clone)]
+pub enum ResultItem {
+    App(RankedApp),
+    Folder {
+        name: String,
+        path: String,
+    },
+}
 
 const RESULT_LIMIT: usize = 9;
 const WINDOW_WIDTH: i32 = 580;
@@ -19,7 +27,7 @@ const ANIMATION_MS: u32 = 200;
 
 #[derive(Default)]
 struct UiState {
-    results: Vec<RankedApp>,
+    results: Vec<ResultItem>,
 }
 
 pub fn run(launcher: Launcher) {
@@ -122,7 +130,17 @@ fn build_ui(app: &gtk::Application, launcher: Launcher) {
             let idx = row.index().max(0) as usize;
             let selected = state.borrow().results.get(idx).cloned();
             if let Some(item) = selected {
-                launcher.launch_app(&item.app);
+match item {
+    ResultItem::App(app) => {
+        launcher.launch_app(&app.app);
+    }
+    ResultItem::Folder { path, .. } => {
+        std::process::Command::new("xdg-open")
+            .arg(path)
+            .spawn()
+            .ok();
+    }
+}
                 window.close();
             } else if launcher.web_search(entry.text().as_str()) {
                 window.close();
@@ -238,6 +256,27 @@ fn center_layer_shell(window: &gtk::ApplicationWindow, _height: i32) {
 #[allow(dead_code)]
 fn center_layer_shell(_window: &gtk::ApplicationWindow, _height: i32) {}
 
+// fn trigger_primary_action(
+//     launcher: &Launcher,
+//     state: &Rc<RefCell<UiState>>,
+//     list: &gtk::ListBox,
+//     entry: &gtk::Entry,
+//     window: &gtk::ApplicationWindow,
+// ) {
+//     if let Some(row) = list.selected_row() {
+//         let idx = row.index().max(0) as usize;
+//         if let Some(item) = state.borrow().results.get(idx).cloned() {
+//             launcher.launch_app(&item.app);
+//             window.close();
+//             return;
+//         }
+//     }
+//
+//     let q = entry.text().to_string();
+//     if launcher.web_search(&q) {
+//         window.close();
+//     }
+// }
 fn trigger_primary_action(
     launcher: &Launcher,
     state: &Rc<RefCell<UiState>>,
@@ -247,8 +286,20 @@ fn trigger_primary_action(
 ) {
     if let Some(row) = list.selected_row() {
         let idx = row.index().max(0) as usize;
+
         if let Some(item) = state.borrow().results.get(idx).cloned() {
-            launcher.launch_app(&item.app);
+            match item {
+                ResultItem::App(app) => {
+                    launcher.launch_app(&app.app);
+                }
+                ResultItem::Folder { path, .. } => {
+                    std::process::Command::new("xdg-open")
+                        .arg(path)
+                        .spawn()
+                        .ok();
+                }
+            }
+
             window.close();
             return;
         }
@@ -260,6 +311,7 @@ fn trigger_primary_action(
     }
 }
 
+
 fn refresh_results(
     launcher: &Launcher,
     entry: &gtk::Entry,
@@ -269,7 +321,16 @@ fn refresh_results(
 ) {
     let query = entry.text().to_string();
     let trimmed = query.trim();
-    let results = launcher.rank(trimmed, RESULT_LIMIT);
+
+    let results: Vec<ResultItem> = if trimmed.starts_with('/') {
+        launcher.rank_folders(trimmed, RESULT_LIMIT)
+    } else {
+        launcher
+            .rank(trimmed, RESULT_LIMIT)
+            .into_iter()
+            .map(ResultItem::App)
+            .collect()
+    };
 
     while let Some(child) = list.first_child() {
         list.remove(&child);
@@ -283,24 +344,37 @@ fn refresh_results(
         container_box.set_margin_start(4);
         container_box.set_margin_end(4);
 
-        if let Some(icon_name) = &result.app.icon {
-            let image = gtk::Image::builder()
-                .icon_name(icon_name)
-                .pixel_size(32)
-                .build();
-            container_box.append(&image);
-        } else {
-            let image = gtk::Image::builder()
-                .icon_name("application-x-executable")
-                .pixel_size(32)
-                .build();
-            container_box.append(&image);
-        }
-        let label = gtk::Label::new(Some(&result.app.name));
+        match result {
+            ResultItem::App(app) => {
+                if let Some(icon_name) = &app.app.icon {
+                    let image = gtk::Image::builder()
+                        .icon_name(icon_name)
+                        .pixel_size(32)
+                        .build();
+                    container_box.append(&image);
+                }
 
-        label.set_xalign(0.0);
-        label.add_css_class("seekx-label");
-        container_box.append(&label);
+                let label = gtk::Label::new(Some(&app.app.name));
+                label.set_xalign(0.0);
+                label.add_css_class("seekx-label");
+                container_box.append(&label);
+            }
+
+            ResultItem::Folder { name, .. } => {
+                let image = gtk::Image::builder()
+                    .icon_name("folder")
+                    .pixel_size(32)
+                    .build();
+
+                container_box.append(&image);
+
+                let label = gtk::Label::new(Some(&name));
+                label.set_xalign(0.0);
+                label.add_css_class("seekx-label");
+                container_box.append(&label);
+            }
+        }
+
         row.set_child(Some(&container_box));
         list.append(&row);
     }
@@ -309,7 +383,6 @@ fn refresh_results(
         list.select_row(Some(&row));
     }
 
-    // Animate the results box in/out
     let show = !trimmed.is_empty() && !results.is_empty();
     revealer.set_reveal_child(show);
 
