@@ -70,10 +70,6 @@ fn build_ui(app: &gtk::Application, launcher: Launcher) {
     let results_box = gtk::Box::new(gtk::Orientation::Vertical, 4);
     results_box.add_css_class("seekx-results-box");
 
-    let status = gtk::Label::new(Some("Matches: 0"));
-    status.set_xalign(0.0);
-    status.add_css_class("seekx-status");
-
     let list = gtk::ListBox::new();
     list.add_css_class("seekx-list");
     list.set_selection_mode(gtk::SelectionMode::Single);
@@ -90,7 +86,6 @@ fn build_ui(app: &gtk::Application, launcher: Launcher) {
     scroller.set_max_content_height(RESULTS_AREA_HEIGHT);
     scroller.add_css_class("seekx-scroll");
 
-    results_box.append(&status);
     results_box.append(&scroller);
 
     // ── Revealer for animated show/hide of results ──
@@ -111,10 +106,9 @@ fn build_ui(app: &gtk::Application, launcher: Launcher) {
         let state = state.clone();
         let launcher = launcher.clone();
         let list = list.clone();
-        let status = status.clone();
         let revealer = revealer.clone();
         entry.connect_changed(move |entry| {
-            refresh_results(&launcher, entry, &list, &status, &revealer, &state);
+            refresh_results(&launcher, entry, &list, &revealer, &state);
         });
     }
 
@@ -184,7 +178,7 @@ fn build_ui(app: &gtk::Application, launcher: Launcher) {
     }
     window.add_controller(key_controller);
 
-    refresh_results(&launcher, &entry, &list, &status, &revealer, &state);
+    refresh_results(&launcher, &entry, &list, &revealer, &state);
     window.present();
     entry.grab_focus();
 }
@@ -269,7 +263,6 @@ fn refresh_results(
     launcher: &Launcher,
     entry: &gtk::Entry,
     list: &gtk::ListBox,
-    status: &gtk::Label,
     revealer: &gtk::Revealer,
     state: &Rc<RefCell<UiState>>,
 ) {
@@ -310,12 +303,6 @@ fn refresh_results(
         row.set_child(Some(&container_box));
         list.append(&row);
     }
-
-    // status.set_text(&format!(
-    //     "Installed: {} | Matches: {}",
-    //     launcher.app_count(),
-    //     results.len()
-    // ));
 
     if let Some(row) = list.row_at_index(0) {
         list.select_row(Some(&row));
