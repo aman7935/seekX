@@ -247,18 +247,27 @@ fn open_in_default_browser_new_window(url: &str) -> bool {
         .args(["get", "default-web-browser"])
         .output();
 
-    let Ok(output) = output else { return false };
+    if let Ok(output) = output {
+        let browser = String::from_utf8_lossy(&output.stdout)
+            .trim()
+            .replace(".desktop", "");
 
-    let browser = String::from_utf8_lossy(&output.stdout)
-        .trim()
-        .replace(".desktop", "");
-
-    if browser.is_empty() {
-        return false;
+        if !browser.is_empty() {
+            if Command::new(&browser)
+                .args(["--new-window", url])
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .is_ok()
+            {
+                return true;
+            }
+        }
     }
 
-    Command::new(browser)
-        .args(["--new-window", url])
+    Command::new("xdg-open")
+        .arg(url)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
