@@ -8,6 +8,9 @@ const FIELD_CODES: [&str; 14] = [
     "%f", "%F", "%u", "%U", "%d", "%D", "%n", "%N", "%i", "%c", "%k", "%v", "%m", "%",
 ];
 
+const SEARCH_URL_TEMPLATE_ENV: &str = "SEEKX_SEARCH_URL_TEMPLATE";
+const DEFAULT_SEARCH_URL_TEMPLATE: &str = "https://duckduckgo.com/?q={query}";
+
 #[derive(Clone)]
 pub struct Launcher {
     apps: Vec<DesktopApp>,
@@ -94,48 +97,13 @@ impl Launcher {
             return false;
         }
 
-        let url = format!(
-            "https://duckduckgo.com/?q={}",
-            urlencoding::encode(q).into_owned()
-        );
+        let url = if looks_like_url(q) {
+            normalize_url(q)
+        } else {
+            build_search_url(q)
+        };
 
-        if try_spawn("firefox", &["--new-tab", &url]) {
-            return true;
-        }
-
-        if try_spawn("google-chrome", &[&url]) {
-            return true;
-        }
-
-        if try_spawn("chromium", &[&url]) {
-            return true;
-        }
-
-        if try_spawn("chromium-browser", &[&url]) {
-            return true;
-        }
-
-        if try_spawn("brave-browser", &[&url]) {
-            return true;
-        }
-
-        if webbrowser::open(&url).is_ok() {
-            return true;
-        }
-
-        if try_spawn("gio", &["open", &url]) {
-            return true;
-        }
-
-        if try_spawn("xdg-open", &[&url]) {
-            return true;
-        }
-
-        if try_spawn("sensible-browser", &[&url]) {
-            return true;
-        }
-
-        false
+        open_in_default_browser(&url)
     }
 }
 
@@ -165,6 +133,98 @@ fn parse_exec(exec_line: &str) -> Vec<String> {
         .collect()
 }
 
+fn open_in_default_browser(url: &str) -> bool {
+    if webbrowser::open(url).is_ok() {
+        return true;
+    }
+
+    if try_spawn("gio", &["open", url]) {
+        return true;
+    }
+
+    if try_spawn("xdg-open", &[url]) {
+        return true;
+    }
+
+    if try_spawn("sensible-browser", &[url]) {
+        return true;
+    }
+
+    false
+}
+
+fn build_search_url_from_env(query: &str) -> Option<String> {
+    let template = std::env::var(SEARCH_URL_TEMPLATE_ENV).ok()?;
+    let encoded = urlencoding::encode(query).into_owned();
+
+    if template.contains("{query}") {
+        return Some(template.replace("{query}", &encoded));
+    }
+
+    if template.contains("%s") {
+        return Some(template.replace("%s", &encoded));
+    }
+
+    Some(format!("{template}{encoded}"))
+}
+
+fn build_search_url(query: &str) -> String {
+    if let Ok(template) = std::env::var(SEARCH_URL_TEMPLATE_ENV) {
+        if !template.trim().is_empty() {
+            if let Some(url) = build_search_url_from_env(query) {
+                return url;
+            }
+        }
+    }
+
+    let encoded = urlencoding::encode(query).into_owned();
+    DEFAULT_SEARCH_URL_TEMPLATE.replace("{query}", &encoded)
+}
+
+fn looks_like_url(input: &str) -> bool {
+    if input.is_empty() {
+        return false;
+    }
+
+    if input.contains(char::is_whitespace) {
+        return false;
+    }
+
+    let lower = input.to_ascii_lowercase();
+    if lower.starts_with("http://") || lower.starts_with("https://") {
+        return true;
+    }
+
+    if lower.starts_with("www.") {
+        return true;
+    }
+
+    // Basic heuristic: host-like strings (domain, localhost, or IP) without spaces.
+    if lower == "localhost" || lower.starts_with("localhost:") {
+        return true;
+    }
+
+    let is_ipv4ish = lower
+        .chars()
+        .all(|c| c.is_ascii_digit() || c == '.' || c == ':');
+    if is_ipv4ish && (lower.contains('.') || lower.contains(':')) {
+        return true;
+    }
+
+    // domain.tld[/...]
+    lower.contains('.') && !lower.starts_with('.')
+}
+
+fn normalize_url(input: &str) -> String {
+    let trimmed = input.trim();
+    let lower = trimmed.to_ascii_lowercase();
+    if lower.starts_with("http://") || lower.starts_with("https://") {
+        return trimmed.to_string();
+    }
+
+    format!("https://{trimmed}")
+}
+
 #[allow(dead_code)]
 fn executable_name(executable: &str) -> String {
     Path::new(executable)
@@ -172,4 +232,41 @@ fn executable_name(executable: &str) -> String {
         .and_then(|value| value.to_str())
         .unwrap_or(executable)
         .to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{Mutex, OnceLock};
+
+    fn env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    #[test]
+    fn default_web_search_url_is_used_when_env_missing() {
+        let _guard = env_lock().lock().unwrap();
+        unsafe {
+            std::env::remove_var(SEARCH_URL_TEMPLATE_ENV);
+        }
+        let url = build_search_url("hello world");
+        assert_eq!(url, "https://duckduckgo.com/?q=hello%20world");
+    }
+
+    #[test]
+    fn env_template_overrides_default() {
+        let _guard = env_lock().lock().unwrap();
+        unsafe {
+            std::env::set_var(
+                SEARCH_URL_TEMPLATE_ENV,
+                "https://example.com/search?q={query}",
+            );
+        }
+        let url = build_search_url("rust lang");
+        assert_eq!(url, "https://example.com/search?q=rust%20lang");
+        unsafe {
+            std::env::remove_var(SEARCH_URL_TEMPLATE_ENV);
+        }
+    }
 }

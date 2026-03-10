@@ -11,6 +11,19 @@ cd seekX
 cargo run --features layer-shell
 ```
 
+## Web search (no hardcoded engine)
+
+seekX opens links in your system default browser. By default, web searches use DuckDuckGo. To use a different engine, set a search URL template via an env var:
+
+```bash
+# examples:
+export SEEKX_SEARCH_URL_TEMPLATE='https://www.google.com/search?q={query}'
+export SEEKX_SEARCH_URL_TEMPLATE='https://duckduckgo.com/?q={query}'
+export SEEKX_SEARCH_URL_TEMPLATE='https://search.brave.com/search?q={query}'
+```
+
+The template can use `{query}` or `%s` as the placeholder (it will be URL-encoded).
+
 ## Add to Applications menu and terminal
 
 Build once:
