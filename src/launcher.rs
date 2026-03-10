@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-
+use walkdir::WalkDir;
 use crate::desktop::DesktopApp;
 use crate::search;
 use crate::ui::ResultItem;
@@ -16,6 +16,7 @@ const DEFAULT_SEARCH_URL_TEMPLATE: &str = "https://duckduckgo.com/?q={query}";
 #[derive(Clone)]
 pub struct Launcher {
     apps: Vec<DesktopApp>,
+    files: Vec<(String, String)>,
 }
 
 #[derive(Clone)]
@@ -25,14 +26,77 @@ pub struct RankedApp {
     pub match_idx: usize,
 }
 
-impl Launcher {
-    pub fn new(apps: Vec<DesktopApp>) -> Self {
-        Self { apps }
+
+fn index_home_files() -> Vec<(String, String)> {
+    let home = std::env::var("HOME").unwrap_or_default();
+
+    let mut files = Vec::new();
+
+    for entry in WalkDir::new(home)
+        .follow_links(false)
+        .into_iter()
+        .filter_entry(|e| {
+            let name = e.file_name().to_string_lossy();
+
+            name != "node_modules"
+                && name != ".cache"
+                && name != ".git"
+                && name != "target"
+        })
+        .filter_map(|e| e.ok())
+    {
+        let path = entry.path();
+
+        if path.is_file() {
+            if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                files.push((
+                    name.to_string(),
+                    path.to_string_lossy().to_string(),
+                ));
+            }
+        }
     }
+
+    files
+}
+
+impl Launcher {
+pub fn new(apps: Vec<DesktopApp>) -> Self {
+    let files = index_home_files();
+
+    Self {
+        apps,
+        files,
+    }
+}
 
     pub fn app_count(&self) -> usize {
         self.apps.len()
     }
+
+
+
+
+pub fn rank_files(&self, query: &str, limit: usize) -> Vec<ResultItem> {
+    let search = query.trim_start_matches("//").to_lowercase();
+
+    let mut results = Vec::new();
+
+    for (name, path) in &self.files {
+        if name.to_lowercase().contains(&search) {
+            results.push(ResultItem::File {
+                name: name.clone(),
+                path: path.clone(),
+            });
+
+            if results.len() >= limit {
+                break;
+            }
+        }
+    }
+
+    results
+}
 
     pub fn rank_folders(&self, query: &str, limit: usize) -> Vec<ResultItem> {
         let home = std::env::var("HOME").unwrap_or_default();

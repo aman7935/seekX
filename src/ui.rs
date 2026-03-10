@@ -17,6 +17,10 @@ pub enum ResultItem {
         name: String,
         path: String,
     },
+    File {
+        name: String,
+        path: String,
+    },
 }
 
 const RESULT_LIMIT: usize = 9;
@@ -130,17 +134,23 @@ fn build_ui(app: &gtk::Application, launcher: Launcher) {
             let idx = row.index().max(0) as usize;
             let selected = state.borrow().results.get(idx).cloned();
             if let Some(item) = selected {
-match item {
-    ResultItem::App(app) => {
-        launcher.launch_app(&app.app);
-    }
-    ResultItem::Folder { path, .. } => {
-        std::process::Command::new("xdg-open")
-            .arg(path)
-            .spawn()
-            .ok();
-    }
-}
+            match item {
+                ResultItem::App(app) => {
+                    launcher.launch_app(&app.app);
+                }
+                ResultItem::Folder { path, .. } => {
+                    std::process::Command::new("xdg-open")
+                        .arg(path)
+                        .spawn()
+                        .ok();
+                }
+                ResultItem::File { path, .. } => {
+                    std::process::Command::new("xdg-open")
+                        .arg(path)
+                        .spawn()
+                        .ok();
+                }
+        }
                 window.close();
             } else if launcher.web_search(entry.text().as_str()) {
                 window.close();
@@ -298,6 +308,12 @@ fn trigger_primary_action(
                         .spawn()
                         .ok();
                 }
+                ResultItem::File { path, .. } => {
+                    std::process::Command::new("xdg-open")
+                        .arg(path)
+                        .spawn()
+                        .ok();
+                }
             }
 
             window.close();
@@ -322,15 +338,31 @@ fn refresh_results(
     let query = entry.text().to_string();
     let trimmed = query.trim();
 
-    let results: Vec<ResultItem> = if trimmed.starts_with('/') {
-        launcher.rank_folders(trimmed, RESULT_LIMIT)
-    } else {
-        launcher
-            .rank(trimmed, RESULT_LIMIT)
-            .into_iter()
-            .map(ResultItem::App)
-            .collect()
-    };
+    // let results: Vec<ResultItem> = if trimmed.starts_with('/') {
+    //     launcher.rank_folders(trimmed, RESULT_LIMIT)
+    // } else {
+    //     launcher
+    //         .rank(trimmed, RESULT_LIMIT)
+    //         .into_iter()
+    //         .map(ResultItem::App)
+    //         .collect()
+    // };
+    //
+
+
+
+let results: Vec<ResultItem> = if trimmed.starts_with("//") {
+    launcher.rank_files(trimmed, RESULT_LIMIT)
+} else if trimmed.starts_with("/") {
+    launcher.rank_folders(trimmed, RESULT_LIMIT)
+} else {
+    launcher
+        .rank(trimmed, RESULT_LIMIT)
+        .into_iter()
+        .map(ResultItem::App)
+        .collect()
+};
+
 
     while let Some(child) = list.first_child() {
         list.remove(&child);
@@ -373,6 +405,59 @@ fn refresh_results(
                 label.add_css_class("seekx-label");
                 container_box.append(&label);
             }
+            // ResultItem::File { name, .. } => {
+            //     let image = gtk::Image::builder()
+            //         .icon_name("text-x-generic")
+            //         .pixel_size(32)
+            //         .build();
+            //
+            //     container_box.append(&image);
+            //
+            //     let label = gtk::Label::new(Some(&name));
+            //     label.set_xalign(0.0);
+            //     label.add_css_class("seekx-label");
+            //     container_box.append(&label);
+            // }
+            ResultItem::File { name, path } => {
+                let image = gtk::Image::builder()
+                    .icon_name("text-x-generic")
+                    .pixel_size(32)
+                    .build();
+
+                container_box.append(&image);
+
+                // vertical layout for name + path
+                let vbox = gtk::Box::new(gtk::Orientation::Vertical, 2);
+
+                // filename
+                let name_label = gtk::Label::new(Some(name));
+                name_label.set_xalign(0.0);
+                name_label.add_css_class("seekx-label");
+
+                let home = std::env::var("HOME").unwrap_or_default();
+
+                // extract parent folder
+                let parent = std::path::Path::new(path)
+                    .parent()
+                    .map(|p| p.to_string_lossy().to_string())
+                    .unwrap_or_default();
+
+                // convert /home/user → ~
+                let display_path = parent.replace(&home, "~");
+
+                // path label
+                let path_label = gtk::Label::new(Some(&display_path));
+                path_label.set_xalign(0.0);
+                path_label.add_css_class("seekx-path");
+                path_label.set_ellipsize(gtk::pango::EllipsizeMode::Start);
+
+
+                vbox.append(&name_label);
+                vbox.append(&path_label);
+
+                container_box.append(&vbox);
+            }
+
         }
 
         row.set_child(Some(&container_box));
@@ -446,7 +531,7 @@ window.seekx-window > * {
 }
 
 .seekx-search-box {
-  background-color: rgba(0, 0, 0, 0.9);
+  background-color: rgba(0, 0, 0, 0.75);
   border: 1px solid #ffffff;
   border-radius: 14px;
   padding: 10px 18px;
@@ -548,6 +633,12 @@ label.seekx-label {
   color: #cccccc;
   font-size: 14px;
   font-weight: 400;
+}
+
+label.seekx-path {
+  color: #808080;
+  font-size: 11px;
+  font-weight: 300;
 }
 
 row.seekx-row:selected label.seekx-label {
