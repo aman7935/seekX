@@ -91,20 +91,25 @@ impl Launcher {
             .spawn();
     }
 
-    pub fn web_search(&self, query: &str) -> bool {
-        let q = query.trim();
-        if q.is_empty() {
-            return false;
-        }
-
-        let url = if looks_like_url(q) {
-            normalize_url(q)
-        } else {
-            build_search_url(q)
-        };
-
-        open_in_default_browser(&url)
+pub fn web_search(&self, query: &str) -> bool {
+    let q = query.trim();
+    if q.is_empty() {
+        return false;
     }
+
+    let url = if looks_like_url(q) {
+        normalize_url(q)
+    } else {
+        build_search_url(q)
+    };
+
+    if open_in_default_browser_new_window(&url) {
+        focus_browser_window();
+        return true;
+    }
+
+    false
+}
 }
 
 fn try_spawn(command: &str, args: &[&str]) -> bool {
@@ -133,24 +138,28 @@ fn parse_exec(exec_line: &str) -> Vec<String> {
         .collect()
 }
 
-fn open_in_default_browser(url: &str) -> bool {
-    if try_spawn("xdg-open", &[url]) {
-        return true;
+fn open_in_default_browser_new_window(url: &str) -> bool {
+    let output = Command::new("xdg-settings")
+        .args(["get", "default-web-browser"])
+        .output();
+
+    let Ok(output) = output else { return false };
+
+    let browser = String::from_utf8_lossy(&output.stdout)
+        .trim()
+        .replace(".desktop", "");
+
+    if browser.is_empty() {
+        return false;
     }
 
-    if try_spawn("gio", &["open", url]) {
-        return true;
-    }
-
-    if webbrowser::open(url).is_ok() {
-        return true;
-    }
-
-    if try_spawn("sensible-browser", &[url]) {
-        return true;
-    }
-
-    false
+    Command::new(browser)
+        .args(["--new-window", url])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .is_ok()
 }
 
 fn build_search_url_from_env(query: &str) -> Option<String> {
@@ -214,6 +223,43 @@ fn looks_like_url(input: &str) -> bool {
     // domain.tld[/...]
     lower.contains('.') && !lower.starts_with('.')
 }
+
+
+
+
+fn focus_browser_window() {
+    let output = Command::new("xdg-settings")
+        .args(["get", "default-web-browser"])
+        .output();
+
+    let Ok(output) = output else { return };
+
+    let browser = String::from_utf8_lossy(&output.stdout)
+        .trim()
+        .replace(".desktop", "");
+
+    if browser.is_empty() {
+        return;
+    }
+
+    let _ = Command::new("niri")
+        .args([
+            "msg",
+            "action",
+            "focus-window",
+            "--app-id",
+            &browser,
+        ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn();
+}
+
+
+
+
+
 
 fn normalize_url(input: &str) -> String {
     let trimmed = input.trim();
