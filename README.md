@@ -1,4 +1,4 @@
-# seekX
+# seekX - App Launcher for Linux
 
 ## Apps and Web Search
 
