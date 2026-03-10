@@ -30,6 +30,15 @@ pub struct RankedApp {
 fn index_home_files() -> Vec<(String, String)> {
     let home = std::env::var("HOME").unwrap_or_default();
 
+    let ignored = [
+        "node_modules",
+        "target",
+        ".cache",
+        ".git",
+        ".local",
+        ".npm",
+    ];
+
     let mut files = Vec::new();
 
     for entry in WalkDir::new(home)
@@ -38,22 +47,19 @@ fn index_home_files() -> Vec<(String, String)> {
         .filter_entry(|e| {
             let name = e.file_name().to_string_lossy();
 
-            name != "node_modules"
-                && name != ".cache"
-                && name != ".git"
-                && name != "target"
+            if name.starts_with('.') {
+                return false;
+            }
+
+            !ignored.contains(&name.as_ref())
         })
         .filter_map(|e| e.ok())
     {
-        let path = entry.path();
+        if entry.file_type().is_file() {
+            let path = entry.path().display().to_string();
+            let name = entry.file_name().to_string_lossy().to_string();
 
-        if path.is_file() {
-            if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                files.push((
-                    name.to_string(),
-                    path.to_string_lossy().to_string(),
-                ));
-            }
+            files.push((name, path));
         }
     }
 
