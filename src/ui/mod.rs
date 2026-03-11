@@ -37,8 +37,12 @@ pub fn run(launcher: Launcher) {
         .application_id("com.seekx.launcher")
         .build();
 
-    app.connect_activate(move |app| {
-        build_ui(app, launcher.clone());
+   app.connect_activate(move |app| {
+        if let Some(window) = app.active_window() {
+            window.present();
+        } else {
+            build_ui(app, launcher.clone());
+        }
     });
 
     app.run();
