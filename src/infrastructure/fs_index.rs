@@ -132,10 +132,7 @@ fn index_home_files() -> Vec<(String, String)> {
     files
 }
 
-fn watch_home(
-    home: String,
-    files: Arc<RwLock<Vec<(String, String)>>>,
-) -> notify::Result<()> {
+fn watch_home(home: String, files: Arc<RwLock<Vec<(String, String)>>>) -> notify::Result<()> {
     let (tx, rx) = std::sync::mpsc::channel();
 
     let mut watcher = RecommendedWatcher::new(tx, Config::default())?;

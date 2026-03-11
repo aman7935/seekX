@@ -2,6 +2,7 @@ pub mod styles;
 
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::mpsc;
 
 use gtk::gdk;
 use gtk::prelude::*;
@@ -16,9 +17,26 @@ use crate::ui::styles::EMBEDDED_CSS;
 #[derive(Clone)]
 pub enum ResultItem {
     App(RankedApp),
-    Folder { name: String, path: String },
-    File { name: String, path: String },
-    WebSearch { query: String },
+    Folder {
+        name: String,
+        path: String,
+    },
+    File {
+        name: String,
+        path: String,
+    },
+    WebSearch {
+        query: String,
+    },
+    Suggestion {
+        text: String,
+    },
+    QuickLink {
+        name: String,
+        url: String,
+        icon: String,
+    },
+    Skeleton,
 }
 
 const RESULT_LIMIT: usize = 9;
@@ -30,6 +48,18 @@ const ANIMATION_MS: u32 = 200;
 #[derive(Default)]
 struct UiState {
     results: Vec<ResultItem>,
+    debounce_id: Option<gtk::glib::SourceId>,
+    latest_query: String,
+}
+
+struct SuggestionUpdate {
+    query: String,
+    suggestions: Vec<ResultItem>,
+}
+
+struct ResultsUpdate {
+    query: String,
+    results: Vec<ResultItem>,
 }
 
 pub fn run(launcher: Launcher) {
@@ -37,7 +67,7 @@ pub fn run(launcher: Launcher) {
         .application_id("com.seekx.launcher")
         .build();
 
-   app.connect_activate(move |app| {
+    app.connect_activate(move |app| {
         if let Some(window) = app.active_window() {
             window.present();
         } else {
@@ -117,13 +147,91 @@ fn build_ui(app: &gtk::Application, launcher: Launcher) {
 
     let state = Rc::new(RefCell::new(UiState::default()));
 
+    let (suggestion_tx, suggestion_rx) = mpsc::channel::<SuggestionUpdate>();
+    let (results_tx, results_rx) = mpsc::channel::<ResultsUpdate>();
+
+    {
+        let state = state.clone();
+        let list = list.clone();
+        gtk::glib::timeout_add_local(std::time::Duration::from_millis(16), move || {
+            for update in suggestion_rx.try_iter() {
+                update_suggestions(&state, &list, &update.query, update.suggestions);
+            }
+            gtk::glib::ControlFlow::Continue
+        });
+    }
+
+    {
+        let state = state.clone();
+        let list = list.clone();
+        let revealer = revealer.clone();
+        gtk::glib::timeout_add_local(std::time::Duration::from_millis(8), move || {
+            for update in results_rx.try_iter() {
+                apply_results_update(&state, &list, &revealer, update);
+            }
+            gtk::glib::ControlFlow::Continue
+        });
+    }
+
     {
         let state = state.clone();
         let launcher = launcher.clone();
         let list = list.clone();
         let revealer = revealer.clone();
-        entry.connect_changed(move |entry| {
-            refresh_results(&launcher, entry, &list, &revealer, &state);
+        let suggestion_tx = suggestion_tx.clone();
+        let results_tx_main = results_tx.clone();
+
+        entry.connect_changed(move |e| {
+            let query = e.text().to_string();
+            state.borrow_mut().latest_query = query.clone();
+
+            // Cancel previous debounce
+            if let Some(id) = state.borrow_mut().debounce_id.take() {
+                // `remove` panics if the source already fired; swallow it to avoid aborting.
+                let _ = std::panic::catch_unwind(|| id.remove());
+            }
+
+            // Immediately show lightweight placeholders
+            show_pending_results(&list, &revealer, &state, &query);
+
+            // Background results computation
+            let launcher_for_results = launcher.clone();
+            let results_tx = results_tx_main.clone();
+            let q_compute = query.clone();
+            std::thread::spawn(move || {
+                let computed = compute_results(&launcher_for_results, &q_compute, false);
+                let _ = results_tx.send(ResultsUpdate {
+                    query: q_compute,
+                    results: computed,
+                });
+            });
+
+            // Debounce the global suggestions
+            if !query.trim().is_empty() {
+                let launcher = launcher.clone();
+                let suggestion_tx = suggestion_tx.clone();
+                let query_clone = query.clone();
+
+                let id = gtk::glib::timeout_add_local(
+                    std::time::Duration::from_millis(150),
+                    move || {
+                        let launcher = launcher.clone();
+                        let tx = suggestion_tx.clone();
+                        let q = query_clone.clone();
+
+                        std::thread::spawn(move || {
+                            let suggestions = launcher.get_suggestions(&q);
+                            let _ = tx.send(SuggestionUpdate {
+                                query: q,
+                                suggestions,
+                            });
+                        });
+
+                        gtk::glib::ControlFlow::Break
+                    },
+                );
+                state.borrow_mut().debounce_id = Some(id);
+            }
         });
     }
 
@@ -154,6 +262,15 @@ fn build_ui(app: &gtk::Application, launcher: Launcher) {
                     }
                     ResultItem::WebSearch { query } => {
                         launcher.web_search(&query);
+                    }
+                    ResultItem::Suggestion { text } => {
+                        launcher.web_search(&text);
+                    }
+                    ResultItem::QuickLink { url, .. } => {
+                        crate::infrastructure::browser::open_default_browser(&url);
+                    }
+                    ResultItem::Skeleton => {
+                        // Non-interactive placeholder; ignore activation.
                     }
                 }
                 window.close();
@@ -212,7 +329,21 @@ fn build_ui(app: &gtk::Application, launcher: Launcher) {
     }
     window.add_controller(key_controller);
 
-    refresh_results(&launcher, &entry, &list, &revealer, &state);
+    // Initial load
+    show_pending_results(&list, &revealer, &state, &entry.text());
+    {
+        let launcher = launcher.clone();
+        let results_tx = results_tx.clone();
+        let q_init = entry.text().to_string();
+        std::thread::spawn(move || {
+            let computed = compute_results(&launcher, &q_init, false);
+            let _ = results_tx.send(ResultsUpdate {
+                query: q_init,
+                results: computed,
+            });
+        });
+    }
+
     window.present();
     entry.grab_focus();
 }
@@ -322,6 +453,13 @@ fn trigger_primary_action(
                 ResultItem::WebSearch { query } => {
                     launcher.web_search(&query);
                 }
+                ResultItem::Suggestion { text } => {
+                    launcher.web_search(&text);
+                }
+                ResultItem::QuickLink { url, .. } => {
+                    crate::infrastructure::browser::open_default_browser(&url);
+                }
+                ResultItem::Skeleton => {}
             }
 
             window.close();
@@ -335,50 +473,133 @@ fn trigger_primary_action(
     }
 }
 
-fn refresh_results(
-    launcher: &Launcher,
-    entry: &gtk::Entry,
+fn compute_results(launcher: &Launcher, query: &str, include_skeletons: bool) -> Vec<ResultItem> {
+    let trimmed = query.trim();
+
+    if trimmed.starts_with("//") {
+        return launcher.rank_files(trimmed, RESULT_LIMIT);
+    }
+    if trimmed.starts_with("/") {
+        return launcher.rank_folders(trimmed, RESULT_LIMIT);
+    }
+
+    let mut results: Vec<ResultItem> = launcher
+        .rank(trimmed, RESULT_LIMIT)
+        .into_iter()
+        .map(ResultItem::App)
+        .collect();
+
+    if include_skeletons && !trimmed.is_empty() {
+        for _ in 0..3 {
+            results.push(ResultItem::Skeleton);
+        }
+    }
+
+    results.push(ResultItem::WebSearch {
+        query: trimmed.to_string(),
+    });
+
+    results.truncate(RESULT_LIMIT);
+    results
+}
+
+fn show_pending_results(
     list: &gtk::ListBox,
     revealer: &gtk::Revealer,
     state: &Rc<RefCell<UiState>>,
+    query: &str,
 ) {
-    let query = entry.text().to_string();
     let trimmed = query.trim();
+    let mut pending: Vec<ResultItem> = Vec::new();
 
-    // let results: Vec<ResultItem> = if trimmed.starts_with('/') {
-    //     launcher.rank_folders(trimmed, RESULT_LIMIT)
-    // } else {
-    //     launcher
-    //         .rank(trimmed, RESULT_LIMIT)
-    //         .into_iter()
-    //         .map(ResultItem::App)
-    //         .collect()
-    // };
-    //
-
-    let results: Vec<ResultItem> = if trimmed.starts_with("//") {
-        launcher.rank_files(trimmed, RESULT_LIMIT)
-    } else if trimmed.starts_with("/") {
-        launcher.rank_folders(trimmed, RESULT_LIMIT)
-    } else {
-        let mut apps: Vec<ResultItem> = launcher
-            .rank(trimmed, RESULT_LIMIT.saturating_sub(1))
-            .into_iter()
-            .map(ResultItem::App)
-            .collect();
-
-        apps.push(ResultItem::WebSearch {
+    if !trimmed.is_empty() {
+        for _ in 0..3 {
+            pending.push(ResultItem::Skeleton);
+        }
+        pending.push(ResultItem::WebSearch {
             query: trimmed.to_string(),
         });
+    }
 
-        apps
-    };
+    render_results(list, &pending, trimmed);
 
+    if let Some(row) = list.row_at_index(0) {
+        list.select_row(Some(&row));
+    }
+
+    revealer.set_reveal_child(!pending.is_empty());
+    state.borrow_mut().results = pending;
+}
+
+fn apply_results_update(
+    state: &Rc<RefCell<UiState>>,
+    list: &gtk::ListBox,
+    revealer: &gtk::Revealer,
+    update: ResultsUpdate,
+) {
+    if state.borrow().latest_query != update.query {
+        return;
+    }
+
+    let trimmed = update.query.trim();
+    render_results(list, &update.results, trimmed);
+
+    if let Some(row) = list.row_at_index(0) {
+        list.select_row(Some(&row));
+    }
+
+    let show = !trimmed.is_empty() && !update.results.is_empty();
+    revealer.set_reveal_child(show);
+
+    state.borrow_mut().results = update.results;
+}
+
+fn update_suggestions(
+    state: &Rc<RefCell<UiState>>,
+    list: &gtk::ListBox,
+    query: &str,
+    suggestions: Vec<ResultItem>,
+) {
+    // Ignore stale responses for older queries
+    if state.borrow().latest_query != query {
+        return;
+    }
+
+    let mut current_results = state.borrow().results.clone();
+    let trimmed = query.trim();
+
+    // Remove skeletons and previous suggestions/websearch
+    current_results.retain(|item| match item {
+        ResultItem::App(_) | ResultItem::Folder { .. } | ResultItem::File { .. } => true,
+        _ => false,
+    });
+
+    // Add new suggestions
+    current_results.extend(suggestions);
+
+    // Re-add WebSearch if not present
+    if !current_results
+        .iter()
+        .any(|item| matches!(item, ResultItem::WebSearch { .. }))
+    {
+        current_results.push(ResultItem::WebSearch {
+            query: trimmed.to_string(),
+        });
+    }
+
+    current_results.truncate(RESULT_LIMIT);
+
+    render_results(list, &current_results, trimmed);
+
+    state.borrow_mut().results = current_results;
+}
+
+fn render_results(list: &gtk::ListBox, results: &[ResultItem], trimmed: &str) {
     while let Some(child) = list.first_child() {
         list.remove(&child);
     }
 
-    for result in &results {
+    for result in results {
         let row = gtk::ListBoxRow::new();
         row.add_css_class("seekx-row");
 
@@ -423,19 +644,6 @@ fn refresh_results(
                 label.add_css_class("seekx-label");
                 container_box.append(&label);
             }
-            // ResultItem::File { name, .. } => {
-            //     let image = gtk::Image::builder()
-            //         .icon_name("text-x-generic")
-            //         .pixel_size(32)
-            //         .build();
-            //
-            //     container_box.append(&image);
-            //
-            //     let label = gtk::Label::new(Some(&name));
-            //     label.set_xalign(0.0);
-            //     label.add_css_class("seekx-label");
-            //     container_box.append(&label);
-            // }
             ResultItem::File { name, path } => {
                 let image = gtk::Image::builder()
                     .icon_name("text-x-generic")
@@ -444,27 +652,20 @@ fn refresh_results(
 
                 container_box.append(&image);
 
-                // vertical layout for name + path
                 let vbox = gtk::Box::new(gtk::Orientation::Vertical, 2);
 
-                // filename
                 let name_label = gtk::Label::new(None);
                 name_label.set_markup(&format_highlighted_label(name, trimmed));
                 name_label.set_xalign(0.0);
                 name_label.add_css_class("seekx-label");
 
                 let home = std::env::var("HOME").unwrap_or_default();
-
-                // extract parent folder
                 let parent = std::path::Path::new(path)
                     .parent()
                     .map(|p| p.to_string_lossy().to_string())
                     .unwrap_or_default();
-
-                // convert /home/user → ~
                 let display_path = parent.replace(&home, "~");
 
-                // path label
                 let path_label = gtk::Label::new(Some(&display_path));
                 path_label.set_xalign(0.0);
                 path_label.add_css_class("seekx-path");
@@ -495,20 +696,60 @@ fn refresh_results(
                 label.add_css_class("seekx-web-label");
                 container_box.append(&label);
             }
+            ResultItem::Suggestion { text } => {
+                let image = gtk::Image::builder()
+                    .icon_name("edit-find")
+                    .pixel_size(32)
+                    .build();
+                container_box.append(&image);
+
+                let label = gtk::Label::new(None);
+                label.set_markup(&format_highlighted_label(text, trimmed));
+                label.set_xalign(0.0);
+                label.add_css_class("seekx-label");
+                container_box.append(&label);
+            }
+            ResultItem::QuickLink { name, url, icon } => {
+                let image = gtk::Image::builder().icon_name(icon).pixel_size(32).build();
+                container_box.append(&image);
+
+                let vbox = gtk::Box::new(gtk::Orientation::Vertical, 2);
+
+                let name_label = gtk::Label::new(None);
+                name_label.set_markup(&format_highlighted_label(name, trimmed));
+                name_label.set_xalign(0.0);
+                name_label.add_css_class("seekx-label");
+
+                let url_label = gtk::Label::new(Some(url));
+                url_label.set_xalign(0.0);
+                url_label.add_css_class("seekx-path");
+                url_label.set_ellipsize(gtk::pango::EllipsizeMode::End);
+
+                vbox.append(&name_label);
+                vbox.append(&url_label);
+                container_box.append(&vbox);
+            }
+            ResultItem::Skeleton => {
+                let skeleton_icon = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+                skeleton_icon.add_css_class("seekx-skeleton-icon");
+                skeleton_icon.set_size_request(32, 32);
+                container_box.append(&skeleton_icon);
+
+                let skeleton_text = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+                skeleton_text.add_css_class("seekx-skeleton-text");
+                skeleton_text.set_hexpand(true);
+                skeleton_text.set_height_request(16);
+                skeleton_text.set_valign(gtk::Align::Center);
+                container_box.append(&skeleton_text);
+
+                row.set_selectable(false);
+                row.set_activatable(false);
+            }
         }
 
         row.set_child(Some(&container_box));
         list.append(&row);
     }
-
-    if let Some(row) = list.row_at_index(0) {
-        list.select_row(Some(&row));
-    }
-
-    let show = !trimmed.is_empty() && !results.is_empty();
-    revealer.set_reveal_child(show);
-
-    state.borrow_mut().results = results;
 }
 
 fn move_selection(

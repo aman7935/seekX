@@ -154,4 +154,33 @@ label.seekx-status {
   padding-bottom: 4px;
   padding-left: 4px;
 }
+
+@keyframes skeleton-shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.seekx-skeleton-icon,
+.seekx-skeleton-text {
+  background: linear-gradient(90deg, #1a1a1a 25%, #333333 50%, #1a1a1a 75%);
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.5s infinite linear;
+}
+
+.seekx-skeleton-icon {
+  border-radius: 6px;
+  min-width: 32px;
+  min-height: 32px;
+}
+
+.seekx-skeleton-text {
+  border-radius: 4px;
+  margin-top: 8px;
+  margin-bottom: 8px;
+  max-width: 200px;
+}
 "#;

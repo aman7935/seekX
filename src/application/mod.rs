@@ -1,7 +1,7 @@
 use std::sync::{Arc, RwLock};
 use std::thread;
 
-use crate::domain::{score, DesktopApp};
+use crate::domain::{DesktopApp, score};
 use crate::infrastructure::browser;
 use crate::infrastructure::desktop;
 use crate::infrastructure::fs_index::FileIndex;
@@ -130,6 +130,28 @@ impl Launcher {
         };
 
         browser::open_default_browser(&url)
+    }
+
+    pub fn get_suggestions(&self, query: &str) -> Vec<ResultItem> {
+        crate::infrastructure::suggestions::get_suggestions(query)
+            .into_iter()
+            .map(|res| {
+                if let Some(url) = res.url {
+                    ResultItem::QuickLink {
+                        name: res.text,
+                        url,
+                        icon: "applications-internet".to_string(),
+                    }
+                } else {
+                    ResultItem::Suggestion { text: res.text }
+                }
+            })
+            .collect()
+    }
+
+    pub fn get_quicklinks(&self, _query: &str) -> Vec<ResultItem> {
+        // QuickLinks are now dynamic and handled within get_suggestions
+        Vec::new()
     }
 }
 

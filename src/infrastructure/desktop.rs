@@ -122,14 +122,19 @@ fn handle_app_event(event: Event, apps: &Arc<RwLock<Vec<DesktopApp>>>) {
                     if let Some(app) = parse_desktop_file(&path) {
                         if let Ok(mut a) = apps.write() {
                             // Deduplicate by name and exec
-                            let dedupe_key = format!("{}:{}", app.name.to_lowercase(), app.exec.to_lowercase());
-                            
+                            let dedupe_key =
+                                format!("{}:{}", app.name.to_lowercase(), app.exec.to_lowercase());
+
                             // Remove existing if any (to update)
                             a.retain(|existing| {
-                                let key = format!("{}:{}", existing.name.to_lowercase(), existing.exec.to_lowercase());
+                                let key = format!(
+                                    "{}:{}",
+                                    existing.name.to_lowercase(),
+                                    existing.exec.to_lowercase()
+                                );
                                 key != dedupe_key
                             });
-                            
+
                             a.push(app);
                             a.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
                         }
@@ -140,7 +145,7 @@ fn handle_app_event(event: Event, apps: &Arc<RwLock<Vec<DesktopApp>>>) {
         EventKind::Remove(_) => {
             // Removing accurately is tricky because we don't have the file anymore to parse it.
             // We'd need a mapping of path -> app.
-            // For now, let's just trigger a full reload on removal to be safe, 
+            // For now, let's just trigger a full reload on removal to be safe,
             // or we could store the path in DesktopApp.
             // Let's improve DesktopApp later. For now, full reload is safer and apps are few.
             if let Ok(mut a) = apps.write() {
@@ -281,9 +286,5 @@ fn parse_desktop_entry_section(contents: &str) -> Option<HashMap<String, String>
         map.insert(key.trim().to_string(), value.trim().to_string());
     }
 
-    if map.is_empty() {
-        None
-    } else {
-        Some(map)
-    }
+    if map.is_empty() { None } else { Some(map) }
 }
