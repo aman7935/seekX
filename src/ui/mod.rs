@@ -430,10 +430,14 @@ fn trigger_primary_action(
     entry: &gtk::Entry,
     window: &gtk::ApplicationWindow,
 ) {
-    if let Some(row) = list.selected_row() {
-        let idx = row.index().max(0) as usize;
+    let results = state.borrow().results.clone();
+    let selected_idx = list
+        .selected_row()
+        .map(|row| row.index().max(0) as usize)
+        .or_else(|| preferred_index(&results));
 
-        if let Some(item) = state.borrow().results.get(idx).cloned() {
+    if let Some(idx) = selected_idx {
+        if let Some(item) = results.get(idx).cloned() {
             match item {
                 ResultItem::App(app) => {
                     launcher.launch_app(&app.app);
@@ -522,10 +526,7 @@ fn show_pending_results(
     }
 
     render_results(list, &pending, trimmed);
-
-    if let Some(row) = list.row_at_index(0) {
-        list.select_row(Some(&row));
-    }
+    select_preferred_row(list, &pending);
 
     revealer.set_reveal_child(!pending.is_empty());
     state.borrow_mut().results = pending;
@@ -543,10 +544,7 @@ fn apply_results_update(
 
     let trimmed = update.query.trim();
     render_results(list, &update.results, trimmed);
-
-    if let Some(row) = list.row_at_index(0) {
-        list.select_row(Some(&row));
-    }
+    select_preferred_row(list, &update.results);
 
     let show = !trimmed.is_empty() && !update.results.is_empty();
     revealer.set_reveal_child(show);
@@ -590,8 +588,49 @@ fn update_suggestions(
     current_results.truncate(RESULT_LIMIT);
 
     render_results(list, &current_results, trimmed);
+    select_preferred_row(list, &current_results);
 
     state.borrow_mut().results = current_results;
+}
+
+fn select_preferred_row(list: &gtk::ListBox, results: &[ResultItem]) {
+    if let Some(idx) = preferred_index(results) {
+        if let Some(row) = list.row_at_index(idx as i32) {
+            list.select_row(Some(&row));
+            return;
+        }
+    }
+
+    list.unselect_all();
+}
+
+fn preferred_index(results: &[ResultItem]) -> Option<usize> {
+    // Prefer suggestions/quicklinks, then concrete resources, and fall back to web search.
+    for (i, item) in results.iter().enumerate() {
+        if matches!(
+            item,
+            ResultItem::Suggestion { .. } | ResultItem::QuickLink { .. }
+        ) {
+            return Some(i);
+        }
+    }
+
+    for (i, item) in results.iter().enumerate() {
+        if matches!(
+            item,
+            ResultItem::App(_) | ResultItem::Folder { .. } | ResultItem::File { .. }
+        ) {
+            return Some(i);
+        }
+    }
+
+    for (i, item) in results.iter().enumerate() {
+        if matches!(item, ResultItem::WebSearch { .. }) {
+            return Some(i);
+        }
+    }
+
+    None
 }
 
 fn render_results(list: &gtk::ListBox, results: &[ResultItem], trimmed: &str) {
