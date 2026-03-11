@@ -37,8 +37,14 @@ pub fn run(launcher: Launcher) {
         .application_id("com.seekx.launcher")
         .build();
 
-   app.connect_activate(move |app| {
+    app.connect_activate(move |app| {
         if let Some(window) = app.active_window() {
+            // If already visible on screen, do NOT open a second instance.
+            if window.is_visible() {
+                return;
+            }
+            // Hidden (closed via hide-on-close): just re-present it.
+            // The window's own `connect_show` handler will clear state.
             window.present();
         } else {
             build_ui(app, launcher.clone());
@@ -189,6 +195,12 @@ fn build_ui(app: &gtk::Application, launcher: Launcher) {
                 window.close();
                 gtk::glib::Propagation::Stop
             }
+            gdk::Key::Tab => {
+                // Deselect text and move cursor to end, keeping the existing text.
+                let len = entry.text().len() as i32;
+                entry.select_region(len, len);
+                gtk::glib::Propagation::Stop
+            }
             gdk::Key::Down => {
                 move_selection(&list, &scroller_clone, &state, 1);
                 gtk::glib::Propagation::Stop
@@ -212,9 +224,24 @@ fn build_ui(app: &gtk::Application, launcher: Launcher) {
     }
     window.add_controller(key_controller);
 
-    refresh_results(&launcher, &entry, &list, &revealer, &state);
+    // On re-open: keep previous text but select it all so one Backspace clears it.
+    // Pressing Tab deselects and moves cursor to end.
+    {
+        let entry = entry.clone();
+        let list = list.clone();
+        let revealer = revealer.clone();
+        let state = state.clone();
+        let launcher = launcher.clone();
+        window.connect_map(move |_| {
+            entry.grab_focus();
+            // Select all existing text so the user can clear it with one Backspace.
+            entry.select_region(0, -1);
+            // Refresh results in case the index has changed since last open.
+            refresh_results(&launcher, &entry, &list, &revealer, &state);
+        });
+    }
+
     window.present();
-    entry.grab_focus();
 }
 
 #[cfg(feature = "layer-shell")]
