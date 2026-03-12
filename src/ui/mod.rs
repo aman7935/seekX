@@ -317,7 +317,21 @@ fn build_ui(app: &gtk::Application, launcher: Launcher) {
                 gtk::glib::Propagation::Stop
             }
 
-            gdk::Key::Tab | gdk::Key::Right => {
+            gdk::Key::Tab => {
+                // First Tab clears the initial selection by moving the caret to the end; subsequent
+                // Tab presses should cycle down through the result list.
+                if let Some((start, end)) = entry.selection_bounds() {
+                    if start != end {
+                        let len = entry.text().len() as i32;
+                        entry.select_region(len, len);
+                        return gtk::glib::Propagation::Stop;
+                    }
+                }
+
+                move_selection(&list, &scroller_clone, &state, 1);
+                gtk::glib::Propagation::Stop
+            }
+            gdk::Key::Right => {
                 let len = entry.text().len() as i32;
                 entry.select_region(len, len);
                 gtk::glib::Propagation::Stop
@@ -828,7 +842,17 @@ fn move_selection(
     }
 
     let current = list.selected_row().map(|row| row.index()).unwrap_or(0);
-    let next = (current + delta).clamp(0, total.saturating_sub(1) as i32);
+
+    // Wrap around when moving past ends (Up from first -> last, Down from last -> first).
+    let last = total.saturating_sub(1) as i32;
+    let next = if delta < 0 && current == 0 {
+        last
+    } else if delta > 0 && current == last {
+        0
+    } else {
+        (current + delta).clamp(0, last)
+    };
+
     if let Some(row) = list.row_at_index(next) {
         list.select_row(Some(&row));
 
