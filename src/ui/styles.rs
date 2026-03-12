@@ -21,7 +21,7 @@ window.seekx-window > * {
 
 .seekx-search-box {
   background-color: #000000;
-  background-color: rgba(0, 0, 0, 0.9);
+  background-color: rgba(0, 0, 0, 0.75);
   border: 1px solid #ffffff;
   border-radius: 14px;
   padding: 10px 18px;

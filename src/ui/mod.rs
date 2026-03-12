@@ -5,6 +5,7 @@ use std::rc::Rc;
 use std::sync::mpsc;
 
 use gtk::gdk;
+use gtk::gdk_pixbuf::PixbufLoader;
 use gtk::prelude::*;
 use gtk4 as gtk;
 #[cfg(feature = "layer-shell")]
@@ -44,6 +45,8 @@ const WINDOW_WIDTH: i32 = 580;
 const SEARCH_BOX_HEIGHT: i32 = 62;
 const RESULTS_AREA_HEIGHT: i32 = 200;
 const ANIMATION_MS: u32 = 200;
+const SUGGESTION_ICON_BYTES: &[u8] = include_bytes!("assets/search_icon3.png");
+const SUGGESTION_ICON_EARTH_BYTES: &[u8] = include_bytes!("assets/earth_icon.png");
 
 #[derive(Default)]
 struct UiState {
@@ -69,7 +72,6 @@ pub fn run(launcher: Launcher) {
 
     app.connect_activate(move |app| {
         if let Some(window) = app.active_window() {
-
             if window.is_visible() {
                 return;
             }
@@ -212,7 +214,8 @@ fn build_ui(app: &gtk::Application, launcher: Launcher) {
             });
 
             // Debounce the global suggestions
-            if !query.trim().is_empty() {
+            let trimmed = query.trim();
+            if !trimmed.is_empty() && !trimmed.starts_with('/') {
                 let launcher = launcher.clone();
                 let suggestion_tx = suggestion_tx.clone();
                 let query_clone = query.clone();
@@ -279,7 +282,9 @@ fn build_ui(app: &gtk::Application, launcher: Launcher) {
                     }
                 }
                 window.close();
-            } else if launcher.web_search(entry.text().as_str()) {
+            } else if !entry.text().trim().starts_with('/')
+                && launcher.web_search(entry.text().as_str())
+            {
                 window.close();
             }
         });
@@ -328,7 +333,7 @@ fn build_ui(app: &gtk::Application, launcher: Launcher) {
             gdk::Key::Return => {
                 if mods.contains(gdk::ModifierType::ALT_MASK) {
                     let q = entry.text().to_string();
-                    if launcher.web_search(&q) {
+                    if !q.trim().starts_with('/') && launcher.web_search(&q) {
                         window.close();
                     }
                     return gtk::glib::Propagation::Stop;
@@ -509,7 +514,7 @@ fn trigger_primary_action(
     }
 
     let q = entry.text().to_string();
-    if launcher.web_search(&q) {
+    if !q.trim().starts_with('/') && launcher.web_search(&q) {
         window.close();
     }
 }
@@ -536,11 +541,7 @@ fn compute_results(launcher: &Launcher, query: &str, include_skeletons: bool) ->
         }
     }
 
-    results.push(ResultItem::WebSearch {
-        query: trimmed.to_string(),
-    });
-
-    results.truncate(RESULT_LIMIT);
+    ensure_required_actions(&mut results, trimmed);
     results
 }
 
@@ -557,9 +558,8 @@ fn show_pending_results(
         for _ in 0..3 {
             pending.push(ResultItem::Skeleton);
         }
-        pending.push(ResultItem::WebSearch {
-            query: trimmed.to_string(),
-        });
+
+        ensure_required_actions(&mut pending, trimmed);
     }
 
     render_results(list, &pending, trimmed);
@@ -612,17 +612,7 @@ fn update_suggestions(
     // Add new suggestions
     current_results.extend(suggestions);
 
-    // Re-add WebSearch if not present
-    if !current_results
-        .iter()
-        .any(|item| matches!(item, ResultItem::WebSearch { .. }))
-    {
-        current_results.push(ResultItem::WebSearch {
-            query: trimmed.to_string(),
-        });
-    }
-
-    current_results.truncate(RESULT_LIMIT);
+    ensure_required_actions(&mut current_results, trimmed);
 
     render_results(list, &current_results, trimmed);
     select_preferred_row(list, &current_results);
@@ -642,11 +632,37 @@ fn select_preferred_row(list: &gtk::ListBox, results: &[ResultItem]) {
 }
 
 fn preferred_index(results: &[ResultItem]) -> Option<usize> {
-    if results.is_empty() {
-        None
-    } else {
-        Some(0)
+    if results.is_empty() { None } else { Some(0) }
+}
+
+fn static_image_from_bytes(bytes: &'static [u8]) -> gtk::Image {
+    let fallback = || {
+        gtk::Image::builder()
+            .icon_name("edit-find")
+            .pixel_size(32)
+            .build()
+    };
+
+    if gdk::Display::default().is_none() {
+        return fallback();
     }
+
+    let loader = PixbufLoader::new();
+    if loader.write(bytes).is_err() {
+        return fallback();
+    }
+    let _ = loader.close();
+
+    let pixbuf = match loader.pixbuf() {
+        Some(pixbuf) => pixbuf,
+        None => return fallback(),
+    };
+
+    let texture = gdk::Texture::for_pixbuf(&pixbuf);
+
+    let image = gtk::Image::from_paintable(Some(&texture));
+    image.set_pixel_size(32);
+    image
 }
 
 fn render_results(list: &gtk::ListBox, results: &[ResultItem], trimmed: &str) {
@@ -732,11 +748,7 @@ fn render_results(list: &gtk::ListBox, results: &[ResultItem], trimmed: &str) {
                 container_box.append(&vbox);
             }
             ResultItem::WebSearch { query } => {
-                let image = gtk::Image::builder()
-                    .icon_name("applications-internet")
-                    .pixel_size(32)
-                    .build();
-
+                let image = static_image_from_bytes(SUGGESTION_ICON_EARTH_BYTES);
                 container_box.append(&image);
 
                 let label_text = if query.is_empty() {
@@ -752,10 +764,7 @@ fn render_results(list: &gtk::ListBox, results: &[ResultItem], trimmed: &str) {
                 container_box.append(&label);
             }
             ResultItem::Suggestion { text } => {
-                let image = gtk::Image::builder()
-                    .icon_name("edit-find")
-                    .pixel_size(32)
-                    .build();
+                let image = static_image_from_bytes(SUGGESTION_ICON_BYTES);
                 container_box.append(&image);
 
                 let label = gtk::Label::new(None);
@@ -869,4 +878,52 @@ fn format_highlighted_label(text: &str, query: &str) -> String {
     } else {
         escaped_text.to_string()
     }
+}
+
+fn ensure_required_actions(results: &mut Vec<ResultItem>, trimmed: &str) {
+    if trimmed.is_empty() {
+        results.truncate(RESULT_LIMIT);
+        return;
+    }
+
+    // For filesystem queries ("/" for folders, "//" for files), suppress web search affordances.
+    if trimmed.starts_with('/') {
+        // Drop any existing WebSearch items injected earlier and enforce the limit.
+        results.retain(|item| !matches!(item, ResultItem::WebSearch { .. }));
+        results.truncate(RESULT_LIMIT);
+        return;
+    }
+
+    let google_url = google_search_url(trimmed);
+
+    // Drop any quicklink that duplicates the main web search target to avoid
+    // showing multiple generic "search" entries.
+    results.retain(|item| match item {
+        ResultItem::QuickLink { url, .. } => url != &google_url,
+        _ => true,
+    });
+
+    // Ensure exactly one WebSearch entry and keep it last.
+    results.retain(|item| !matches!(item, ResultItem::WebSearch { .. }));
+    results.push(ResultItem::WebSearch {
+        query: trimmed.to_string(),
+    });
+
+    while results.len() > RESULT_LIMIT {
+        if let Some(pos) = results
+            .iter()
+            .rposition(|item| !matches!(item, ResultItem::WebSearch { .. }))
+        {
+            results.remove(pos);
+        } else {
+            results.pop();
+        }
+    }
+}
+
+fn google_search_url(query: &str) -> String {
+    format!(
+        "https://www.google.com/search?q={}",
+        urlencoding::encode(query)
+    )
 }
