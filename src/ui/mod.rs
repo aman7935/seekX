@@ -69,6 +69,11 @@ pub fn run(launcher: Launcher) {
 
     app.connect_activate(move |app| {
         if let Some(window) = app.active_window() {
+
+            if window.is_visible() {
+                return;
+            }
+
             window.present();
         } else {
             build_ui(app, launcher.clone());
@@ -306,6 +311,12 @@ fn build_ui(app: &gtk::Application, launcher: Launcher) {
                 window.close();
                 gtk::glib::Propagation::Stop
             }
+
+            gdk::Key::Tab | gdk::Key::Right => {
+                let len = entry.text().len() as i32;
+                entry.select_region(len, len);
+                gtk::glib::Propagation::Stop
+            }
             gdk::Key::Down => {
                 move_selection(&list, &scroller_clone, &state, 1);
                 gtk::glib::Propagation::Stop
@@ -329,23 +340,49 @@ fn build_ui(app: &gtk::Application, launcher: Launcher) {
     }
     window.add_controller(key_controller);
 
-    // Initial load
-    show_pending_results(&list, &revealer, &state, &entry.text());
+    // ── Window mapping / reopening logic ──
     {
         let launcher = launcher.clone();
+        let entry = entry.clone();
+        let list = list.clone();
+        let revealer = revealer.clone();
+        let state = state.clone();
         let results_tx = results_tx.clone();
-        let q_init = entry.text().to_string();
-        std::thread::spawn(move || {
-            let computed = compute_results(&launcher, &q_init, false);
-            let _ = results_tx.send(ResultsUpdate {
-                query: q_init,
-                results: computed,
-            });
+
+        window.connect_map(move |_| {
+            entry.grab_focus();
+            // Select all existing text so the user can clear it with one Backspace.
+            entry.select_region(0, -1);
+            // Refresh results in case the index has changed since last open.
+            refresh_results(&launcher, &entry, &list, &revealer, &state, &results_tx);
         });
     }
 
     window.present();
     entry.grab_focus();
+}
+
+fn refresh_results(
+    launcher: &Launcher,
+    entry: &gtk::Entry,
+    list: &gtk::ListBox,
+    revealer: &gtk::Revealer,
+    state: &Rc<RefCell<UiState>>,
+    results_tx: &mpsc::Sender<ResultsUpdate>,
+) {
+    let query = entry.text();
+    show_pending_results(list, revealer, state, &query);
+
+    let launcher = launcher.clone();
+    let results_tx = results_tx.clone();
+    let q_init = query.to_string();
+    std::thread::spawn(move || {
+        let computed = compute_results(&launcher, &q_init, false);
+        let _ = results_tx.send(ResultsUpdate {
+            query: q_init,
+            results: computed,
+        });
+    });
 }
 
 #[cfg(feature = "layer-shell")]
