@@ -642,32 +642,11 @@ fn select_preferred_row(list: &gtk::ListBox, results: &[ResultItem]) {
 }
 
 fn preferred_index(results: &[ResultItem]) -> Option<usize> {
-    // Prefer suggestions/quicklinks, then concrete resources, and fall back to web search.
-    for (i, item) in results.iter().enumerate() {
-        if matches!(
-            item,
-            ResultItem::Suggestion { .. } | ResultItem::QuickLink { .. }
-        ) {
-            return Some(i);
-        }
+    if results.is_empty() {
+        None
+    } else {
+        Some(0)
     }
-
-    for (i, item) in results.iter().enumerate() {
-        if matches!(
-            item,
-            ResultItem::App(_) | ResultItem::Folder { .. } | ResultItem::File { .. }
-        ) {
-            return Some(i);
-        }
-    }
-
-    for (i, item) in results.iter().enumerate() {
-        if matches!(item, ResultItem::WebSearch { .. }) {
-            return Some(i);
-        }
-    }
-
-    None
 }
 
 fn render_results(list: &gtk::ListBox, results: &[ResultItem], trimmed: &str) {
