@@ -4,34 +4,41 @@ window.seekx-window.background,
 window.seekx-window > * {
   background-color: transparent;
   background: none;
+  border-radius: 0 !important;
 }
 
-*,
+/* FORCE RECTANGLES EVERYWHERE */
+* {
+  border-radius: 0 !important;
+  outline: none;
+  box-shadow: none;
+}
+
 *:focus,
 *:focus-visible,
 *:selected {
   outline: none;
   box-shadow: none;
+  border-radius: 0 !important;
 }
 
 .seekx-outer {
   background-color: transparent;
   background: none;
+  border-radius: 0 !important;
 }
 
 .seekx-search-box {
-  background-color: #000000;
   background-color: rgba(0, 0, 0, 0.75);
   border: 1px solid #ffffff;
-  border-radius: 14px;
+  border-radius: 0 !important;
   padding: 10px 18px;
 }
 
 .seekx-results-box {
-  background-color: #000000;
   background-color: rgba(0, 0, 0, 0.75);
   border: 1px solid #ffffff;
-  border-radius: 14px;
+  border-radius: 0 !important;
   padding: 10px 16px;
 }
 
@@ -40,7 +47,7 @@ entry.seekx-entry text {
   background: transparent;
   color: #ffffff;
   border: none;
-  border-radius: 0;
+  border-radius: 0 !important;
   font-size: 18px;
   font-weight: 500;
   box-shadow: none;
@@ -50,58 +57,19 @@ entry.seekx-entry text {
 entry.seekx-entry {
   min-height: 40px;
   padding: 0 4px;
-}
-
-entry.seekx-entry:focus {
-  outline: none;
-  box-shadow: none;
-  border: none;
-}
-
-entry.seekx-entry:focus-visible,
-row.seekx-row:focus,
-row.seekx-row:focus-visible,
-list.seekx-list:focus,
-list.seekx-list:focus-visible,
-scrolledwindow.seekx-scroll:focus,
-scrolledwindow.seekx-scroll:focus-visible {
-  outline: none;
-  box-shadow: none;
-}
-
-scrolledwindow.seekx-scroll,
-scrolledwindow.seekx-scroll > viewport,
-scrolledwindow.seekx-scroll > viewport > * {
-  background: transparent;
-  border: none;
-  box-shadow: none;
-}
-
-scrolledwindow.seekx-scroll scrollbar {
-  background: transparent;
-  border: none;
-}
-
-scrolledwindow.seekx-scroll scrollbar slider {
-  background-color: #ffffff;
-  border-radius: 99px;
-  min-width: 4px;
-  min-height: 24px;
-}
-
-scrolledwindow.seekx-scroll scrollbar slider:hover {
-  background-color: #cccccc;
+  border-radius: 0 !important;
 }
 
 list.seekx-list {
   background: transparent;
   border: none;
+  border-radius: 0 !important;
 }
 
 row.seekx-row {
   background-color: transparent;
   border: none;
-  border-radius: 8px;
+  border-radius: 0 !important;
   margin-top: 1px;
   margin-bottom: 1px;
   padding: 8px 10px;
@@ -114,10 +82,20 @@ row.seekx-row:hover {
 row.seekx-row:selected {
   background-color: #333333;
   border: none;
+  border-radius: 0 !important;
 }
 
 row.seekx-row:selected:hover {
   background-color: #4d4d4d;
+}
+
+scrolledwindow.seekx-scroll,
+scrolledwindow.seekx-scroll > viewport,
+scrolledwindow.seekx-scroll > viewport > * {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  border-radius: 0 !important;
 }
 
 label.seekx-label {
@@ -144,43 +122,5 @@ label.seekx-web-label {
 
 row.seekx-row:selected label.seekx-web-label {
   color: #d2e3fc;
-}
-
-label.seekx-status {
-  color: #808080;
-  font-size: 11px;
-  font-weight: 300;
-  padding-top: 2px;
-  padding-bottom: 4px;
-  padding-left: 4px;
-}
-
-@keyframes skeleton-shimmer {
-  0% {
-    background-position: -200% 0;
-  }
-  100% {
-    background-position: 200% 0;
-  }
-}
-
-.seekx-skeleton-icon,
-.seekx-skeleton-text {
-  background: linear-gradient(90deg, #1a1a1a 25%, #333333 50%, #1a1a1a 75%);
-  background-size: 200% 100%;
-  animation: skeleton-shimmer 1.5s infinite linear;
-}
-
-.seekx-skeleton-icon {
-  border-radius: 6px;
-  min-width: 32px;
-  min-height: 32px;
-}
-
-.seekx-skeleton-text {
-  border-radius: 4px;
-  margin-top: 8px;
-  margin-bottom: 8px;
-  max-width: 200px;
 }
 "#;
