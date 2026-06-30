@@ -26,10 +26,19 @@ pub struct FileIndex {
 
 impl FileIndex {
     pub fn new() -> Self {
-        let files = Arc::new(RwLock::new(index_home_files()));
+        let files = Arc::new(RwLock::new(Vec::new()));
         let index = Self {
             files: files.clone(),
         };
+
+        // Index files in the background so the UI appears immediately.
+        let bg_files = files.clone();
+        thread::spawn(move || {
+            let indexed = index_home_files();
+            if let Ok(mut f) = bg_files.write() {
+                *f = indexed;
+            }
+        });
 
         let home = std::env::var("HOME").unwrap_or_default();
         if !home.is_empty() {
